@@ -2,10 +2,15 @@ const express = require("express");
 const mongoose = require("mongoose");
 const dotenv = require("dotenv");
 const jwt = require("jsonwebtoken");
+const bcrypt = require("bcrypt");
+const z = require("zod");
 dotenv.config({ path: "./.env" });
 const { User, Task } = require("./db");
+const { registerSchema, loginSchema, taskSchema } = require("./types");
 const app = express();
 const port = 3000;
+
+const saltRounds = 10;
 
 app.use(express.json());
 
@@ -17,6 +22,14 @@ app.get("/", (req, res) => {
 app.post("/register", async (req, res) => {
   const { name, email, password } = req.body;
 
+  const isValidInfo = registerSchema.safeParse(req.body);
+
+  if (!isValidInfo.success) {
+    return res.status(400).json({
+      message: "Invalid credentials",
+    });
+  }
+
   const userExists = await User.findOne({ email });
   if (userExists) {
     return res.json({
@@ -25,10 +38,12 @@ app.post("/register", async (req, res) => {
   }
 
   try {
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
     const newUser = await User.create({
       name,
       email,
-      password,
+      hashedPassword,
     });
 
     return res.json({
@@ -42,6 +57,14 @@ app.post("/register", async (req, res) => {
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
+  const isValidInfo = loginSchema.safeParse(req.body);
+
+  if (!isValidInfo.success) {
+    return res.status(400).json({
+      message: "Invalid credentials",
+    });
+  }
+
   const userExists = await User.findOne({ email });
 
   if (!userExists) {
@@ -49,6 +72,15 @@ app.post("/login", async (req, res) => {
   }
 
   try {
+    const passwordsMatch = await bcrypt.compare(
+      password,
+      userExists.hashedPassword
+    );
+
+    if (!passwordsMatch) {
+      throw new Error("passwords do not match");
+    }
+
     const token = jwt.sign({ userId: userExists._id }, process.env.JWT_SECRET);
 
     return res.json({ token });
@@ -92,6 +124,14 @@ app.get("/verify", (req, res) => {
 app.post("/tasks", verifyUser, async (req, res) => {
   const { description, isCompleted } = req.body;
 
+  const isValidTaskDetails = taskSchema.safeParse(req.body);
+
+  if (!isValidTaskDetails.success) {
+    return res.status(400).json({
+      message: "Please provide correct details",
+    });
+  }
+
   try {
     const newTask = await Task.create({
       description,
@@ -126,6 +166,15 @@ app.get("/tasks", verifyUser, async (req, res) => {
 
 app.put("/tasks/:id", verifyUser, async (req, res) => {
   const taskId = req.params.id;
+
+  const isValidTaskDetails = taskSchema.safeParse(req.body);
+
+  if (!isValidTaskDetails.success) {
+    return res.status(400).json({
+      message: "Please provide correct details",
+    });
+  }
+
   const { description, isCompleted } = req.body;
 
   try {
